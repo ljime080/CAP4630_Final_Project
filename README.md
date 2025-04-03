@@ -2,7 +2,7 @@
 
 Models:
 
-Juan: LSTM Se2Seg
+Juan: LSTM Seq2Seq
 <br>
 Omar : LSTM Bidirectional Seq2Seq
 <br>
