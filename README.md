@@ -3,6 +3,7 @@
 Models:
 
 Juan: LSTM Se2Seg
+<br>
 Omar : LSTM Bidirectional Seq2Seq
 Jayvee: LSTM Bidirectional
 Tito: GRU Seq2Seq
