@@ -18,8 +18,6 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error , mean_absol
 warnings.filterwarnings('ignore')
 
 
-
-
 def get_data(ticker):
 
     df = yf.download(ticker, period = '1y' )['Close'] 
