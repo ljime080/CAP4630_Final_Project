@@ -37,8 +37,8 @@ def get_data(ticker):
 # Step 1: Check stationarity and difference until stationary
 def check_stationarity(time_series):
     result = adfuller(time_series.dropna())
-    print('ADF Statistic:', result[0])
-    print('p-value:', result[1])
+    #print('ADF Statistic:', result[0])
+    #print('p-value:', result[1])
     return result[1] < 0.05
 
 def make_stationary(time_series):
@@ -47,14 +47,28 @@ def make_stationary(time_series):
     while not check_stationarity(differenced_series) and d_value < 2:
         differenced_series = differenced_series.diff().dropna()
         d_value += 1
-        print(f"\nAfter differencing {d_value} time(s):")
+        #print(f"\nAfter differencing {d_value} time(s):")
     return differenced_series, d_value
 
 
 # Step 2: Get AR and MA parameters from stationary series
 def get_ar_ma_parameters(ts_stationary):
-    order_selection = sm.tsa.arma_order_select_ic(ts_stationary, max_ar=5, max_ma=5, ic=['aic'])
-    p, q = order_selection.aic_min_order
+    order_selection = sm.tsa.arma_order_select_ic(ts_stationary, max_ar=5, max_ma=5,  ic=['aic', 'bic', 'hqic'])
+
+    best_aic  = order_selection.aic_min_order
+    best_bic  = order_selection.bic_min_order
+    best_hqic = order_selection.hqic_min_order
+
+    # If all criteria agree, use that order.
+    if best_aic == best_bic == best_hqic:
+        best_order = best_aic
+    else:
+        # If they differ, you can:
+        # Option 1: Pick the order from the criterion that best suits your priorities.
+        #         For instance, BIC tends to favor simpler models.
+        best_order = best_bic
+
+    p, q = best_order
     return p, q
 
 
@@ -81,8 +95,8 @@ def process_fold(start, train, train_size, test_size):
     cv_test = train.iloc[start + train_size: start + train_size + test_size]
     
     # Print progress information for this fold.
-    print(f"Processing fold: Training indices {cv_train.index[0]} to {cv_train.index[-1]}, "
-          f"Test indices {cv_test.index[0]} to {cv_test.index[-1]}")
+    #print(f"Processing fold: Training indices {cv_train.index[0]} to {cv_train.index[-1]}, "
+    #      f"Test indices {cv_test.index[0]} to {cv_test.index[-1]}")
     
     # Make series stationary and find d
     cv_train_stationary, d = make_stationary(cv_train.Price)
@@ -102,6 +116,10 @@ def process_fold(start, train, train_size, test_size):
         'mse': mse,
         'mape': mape
     }
+
+
+def run_fold(args):
+    return process_fold(*args)
 
 
 def main():
@@ -128,8 +146,7 @@ def main():
     print("Starting parallel rolling cross validation using ProcessPoolExecutor...")
     cv_results = []
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        # Use executor.map to maintain order and wrap with tqdm for progress indication.
-        for result in tqdm(executor.map(lambda args: process_fold(*args), fold_args), total=n_splits):
+        for result in tqdm(executor.map(run_fold, fold_args), total=n_splits, desc="Parallel CV"):
             cv_results.append(result)
     
     # Plot the results in a grid of subplots.
@@ -157,8 +174,8 @@ def main():
     
                 axes[k].plot(curr_cv_test.index, curr_cv_test, label='CV test data', color='blue')
                 axes[k].plot(curr_forecast_cv.index, curr_forecast_cv, label='CV forecast', color='orange')
-                axes[k].set_title(plot_title)
-                axes[k].legend()
+                #axes[k].set_title(plot_title)
+                #axes[k].legend()
                 k += 1
             else:
                 # Turn off any extra subplots.

@@ -22,8 +22,6 @@ warnings.filterwarnings('ignore')
 
 def get_data(ticker):
 
-    
-
     df = yf.download(ticker, period = '1y' )['Close'] 
     df.columns.name = None 
     df = df['TSLA'].reset_index()
