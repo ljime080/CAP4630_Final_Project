@@ -15,8 +15,8 @@ TICKER = 'TSLA'
 PERIOD = '5y'
 INPUT_LEN = 30
 OUTPUT_LEN = 30
-NUM_FORECASTS = 10
-EPOCHS = 50
+NUM_FORECASTS = 5
+EPOCHS = 30
 BATCH_SIZE = 64
 
 def download_data(ticker, period='5y'):
@@ -46,8 +46,8 @@ def build_seq2seq_model(input_len, output_len):
     model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
     return model
 
-def plot_forecasts(model, X_test, y_test, scaler, num_forecasts=10):
-    plt.figure(figsize=(10, 6))
+def plot_forecasts(model, X_test, y_test, scaler, num_forecasts=5):
+    plt.figure(figsize=(12, 6))
 
     # Plot true trend
     true_trend = scaler.inverse_transform(y_test[0])
@@ -76,7 +76,7 @@ def main():
 
     # Prepare sequences
     X, y = create_sequences(scaled_data, INPUT_LEN, OUTPUT_LEN)
-    split = int(0.8 * len(X))
+    split = int(0.75 * len(X))
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
 
