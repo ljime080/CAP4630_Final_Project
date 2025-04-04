@@ -41,6 +41,7 @@ def check_stationarity(time_series):
     #print('p-value:', result[1])
     return result[1] < 0.05
 
+
 def make_stationary(time_series):
     differenced_series = time_series.copy()
     d_value = 0
@@ -187,3 +188,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
