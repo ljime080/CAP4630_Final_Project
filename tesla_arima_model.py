@@ -295,7 +295,7 @@ def main():
     # Step 2: Show ACF/PACF plots for educational purposes
     print("\n=== Step 2: Visual inspection with ACF/PACF plots ===")
     print("\nShowing ACF and PACF plots for visual reference:")
-    max_p, max_d, max_q = identify_p_q_values(differenced_series)
+    max_p, max_d, max_q =  5,1,5   #identify_p_q_values(differenced_series)
 
     # Step 3: Automated grid search for best parameters
     print("\n=== Step 3: Grid search for optimal p and q values ===")
