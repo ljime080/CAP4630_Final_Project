@@ -2,16 +2,17 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import yfinance as yf
-import itertools
 import warnings
 import math
-import concurrent.futures
-from tqdm import tqdm
-
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.arima.model import ARIMA
+
+
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+
+import concurrent.futures
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
@@ -24,61 +25,62 @@ def get_data(ticker):
     df.columns = ['Date', 'Price']
     df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
     df = df.sort_values(by='Date')
-
-    train_size = int(len(df) * 0.8)
-    train, test = df.iloc[:train_size], df.iloc[ (df.shape[0] - 30 ) :]
-    train = train.sort_values(by='Date')
-    test = test.sort_values(by='Date')
-    return train, test
+    return df
 
 
-# Step 1: Check stationarity and difference until stationary
 def check_stationarity(time_series):
     result = adfuller(time_series.dropna())
-    #print('ADF Statistic:', result[0])
-    #print('p-value:', result[1])
     return result[1] < 0.05
 
 
 def make_stationary(time_series):
     differenced_series = time_series.copy()
     d_value = 0
+    # Difference until the series is stationary (up to 2 differences)
     while not check_stationarity(differenced_series) and d_value < 2:
         differenced_series = differenced_series.diff().dropna()
         d_value += 1
-        #print(f"\nAfter differencing {d_value} time(s):")
     return differenced_series, d_value
 
 
-# Step 2: Get AR and MA parameters from stationary series
 def get_ar_ma_parameters(ts_stationary):
-    order_selection = sm.tsa.arma_order_select_ic(ts_stationary, max_ar=5, max_ma=5,  ic=['aic', 'bic', 'hqic'])
-
+    order_selection = sm.tsa.arma_order_select_ic(ts_stationary, max_ar=5, max_ma=5, ic=['aic', 'bic', 'hqic'])
     best_aic  = order_selection.aic_min_order
     best_bic  = order_selection.bic_min_order
     best_hqic = order_selection.hqic_min_order
-
-    # If all criteria agree, use that order.
-    if best_aic == best_bic == best_hqic:
-        best_order = best_aic
-    else:
-        # If they differ, you can:
-        # Option 1: Pick the order from the criterion that best suits your priorities.
-        #         For instance, BIC tends to favor simpler models.
-        best_order = best_bic
-
+    # Choose the order—if they agree, use that; otherwise, use BIC for simplicity.
+    best_order = best_aic if (best_aic == best_bic == best_hqic) else best_bic
     p, q = best_order
     return p, q
 
 
-# Step 3: Fit the ARIMA model
-def fit_arima_model(cv_train, p, d, q):
-    model = ARIMA(cv_train, order=(p, d, q) , enforce_stationarity=False, enforce_invertibility=False)
-    model = model.fit()
-    return model
+def fit_arima_model(data, p, d, q):
+    # Disable enforced stationarity and invertibility to avoid numerical issues
+    model = ARIMA(data, order=(p, d, q), enforce_stationarity=False, enforce_invertibility=False)
+    results = model.fit()
+    return results
 
 
-# Step 4: Forecast and calculate error metrics
+def get_yearly_splits(df, forecast_horizon=30):
+    """
+    Splits the data by calendar year. For each year, the training set is the data within that year,
+    and the forecast (test) set is the next `forecast_horizon` rows after the last date of that year.
+    """
+    years = sorted(df['Date'].dt.year.unique())
+    splits = []
+    i = 0
+    for year in years:
+        # Training data: all rows for the given year
+        train_data = df[df['Date'].dt.year == year].copy()
+        last_date = train_data['Date'].max()
+        # Forecast set: next forecast_horizon rows from the overall dataset (if available)
+        test_data = df[df['Date'] > last_date].copy().head(forecast_horizon)
+        if not test_data.empty:
+            splits.append((i + 1, train_data, test_data))
+            i +=1
+    return splits
+
+
 def get_metrics(model, test_set):
     forecasts = model.forecast(steps=len(test_set))
     mae = mean_absolute_error(test_set, forecasts)
@@ -87,79 +89,44 @@ def get_metrics(model, test_set):
     return forecasts, mae, mse, mape
 
 
-# This function processes one CV fold; it is designed for parallel execution.
-def process_fold(start, train, train_size, test_size):
-    # Define training and test splits for this fold.
-    cv_train = train.iloc[start: start + train_size]
-    cv_test = train.iloc[start + train_size: start + train_size + test_size]
-    
-    # Print progress information for this fold.
-    #print(f"Processing fold: Training indices {cv_train.index[0]} to {cv_train.index[-1]}, "
-    #      f"Test indices {cv_test.index[0]} to {cv_test.index[-1]}")
-    
-    # Make series stationary and find d
-    cv_train_stationary, d = make_stationary(cv_train.Price)
-    # Get AR and MA parameters
-    p, q = get_ar_ma_parameters(cv_train_stationary)
-    # Fit the ARIMA model
-    cv_model = fit_arima_model(cv_train.Price, p, d, q)
-    # Forecast and calculate metrics
-    forecast_cv, mae, mse, mape = get_metrics(cv_model, cv_test.Price)
-    
+
+def process_year_split(train_data, test_data , train_year):
+    """
+    For one yearly split, makes the training data stationary,
+    selects AR and MA parameters, fits an ARIMA model, and forecasts the test period.
+    Returns a dictionary with the fitted model, forecast values, and confidence intervals.
+    """
+    # Make the training series stationary and determine the order of differencing (d)
+    train_stationary, d = make_stationary(train_data.Price)
+    # Determine AR and MA orders (p and q) from the stationary series
+    p, q = get_ar_ma_parameters(train_stationary)
+    # Fit the ARIMA model on the original (non-differenced) training data
+    model_result = fit_arima_model(train_data.Price, p, d, q)
+    # Forecast the test period; get_forecast provides confidence intervals
+    forecast_cv, mae, mse, mape = get_metrics(model_result, test_data.Price)
+
+    forecast_obj = model_result.get_forecast(steps=len(test_data))
+    forecast_mean = forecast_obj.predicted_mean
+    forecast_conf_int = forecast_obj.conf_int()
+
     return {
-        'model': cv_model,
+        'model': model_result,
         'model_orders': (p, d, q),
-        'aic': cv_model.aic,
-        'cv_test': cv_test.Price,
-        'cv_forecasts': forecast_cv,
+        'aic': model_result.aic,
+        'forecast_mean': forecast_mean,
+        'forecast_conf_int': forecast_conf_int,
+        'train': train_data,
+        'test': test_data,
         'mae': mae,
         'mse': mse,
         'mape': mape
     }
 
 
-def run_fold(args):
-    return process_fold(*args)
 
-
-
-def plot_cv_results(cv_results , n_rows, n_cols , n_splits):
-    cv_fig, cv_axs = plt.subplots(n_rows, n_cols, figsize=(60, 30))
-    # If more than one subplot, flatten the axes array.
-    if n_splits > 1:
-        axes = cv_axs.flatten()
-    else:
-        axes = [cv_axs]
-    
-    k = 0
-    for i in range(n_rows):
-        for j in range(n_cols):
-            if k < len(cv_results):
-                curr_result = cv_results[k]
-                curr_cv_test = curr_result['cv_test']
-                curr_forecast_cv = curr_result['cv_forecasts']
-                curr_mse = curr_result['mse']
-                curr_mae = curr_result['mae']
-                curr_mape = curr_result['mape']
-                p, d, q = curr_result['model_orders']
-    
-                plot_title = (f"p = {p}, d = {d}, q = {q}\n"
-                              f"MSE = {curr_mse:.2f}, MAE = {curr_mae:.2f}, MAPE = {curr_mape:.2f}")
-    
-                axes[k].plot(curr_cv_test.index, curr_cv_test, label='CV test data', color='blue')
-                axes[k].plot(curr_forecast_cv.index, curr_forecast_cv, label='CV forecast', color='orange')
-                k += 1
-            else:
-                # Turn off any extra subplots.
-                cv_axs[i, j].axis('off')
-    
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_test_results(final_model , train, test , p , d , q):
-    test_forecasts = final_model.get_forecast(n = len(test) )
-    test_forecast_mean = test_forecasts.mean
+def plot_test_results(final_model, train, test, p, d, q):
+    test_forecasts = final_model.get_forecast(steps=len(test.Price))
+    test_forecast_mean = test_forecasts.predicted_mean
     test_forecast_confint = test_forecasts.conf_int()
 
     plt.figure(figsize=(12, 6))
@@ -170,61 +137,75 @@ def plot_test_results(final_model , train, test , p , d , q):
                      test_forecast_confint.iloc[:, 0], 
                      test_forecast_confint.iloc[:, 1],
                      color='pink', alpha=0.3, label='Confidence Interval')
-    plt.title("Test Set Forecast with Confidence Intervals using ARIMA ({p} , {d} , {q})")
+    plt.title(f"Test Set Forecast with Confidence Intervals using ARIMA ({p}, {d}, {q})")
     plt.xlabel("Date")
     plt.ylabel("Price")
     plt.legend()
+
+    plt.savefig("./plots/test_results_trained_parallel.png", dpi=300)
     plt.show()
 
 
-
-
+def process_split_wrapper(split):
+    year, train_data, test_data = split
+    res = process_year_split(train_data, test_data, year)
+    res['year'] = year
+    return res
 
 def main():
-    train, test = get_data(ticker=['TSLA'])
+    # Download 5 years of TSLA data
+    df = get_data(ticker=['TSLA'])
     
-    # Fixed window sizes:
-    train_size = 365
-    test_size = 30
-    window_size = train_size + test_size
+    # Create yearly splits: each tuple is (year, train_data, test_data)
+    splits = get_yearly_splits(df, forecast_horizon=30)
     
-    # Calculate number of CV splits
-    n_splits = len(train) - window_size + 30
-    print("Number of rolling CV splits:", n_splits)
-    
-    # Determine grid layout for subplots based on n_splits.
-    n_cols = math.ceil(math.sqrt(n_splits))
-    n_rows = math.ceil(n_splits / n_cols)
-    print(f"Using a grid of {n_rows} rows and {n_cols} columns for the subplots.")
-    
-    # Prepare the list of fold arguments.
-    fold_args = [(start, train, train_size, test_size) for start in range(n_splits)]
-    
-    # Parallel processing of the rolling CV folds.
-    print("Starting parallel rolling cross validation using ProcessPoolExecutor...")
-    cv_results = []
+    # Process the yearly splits in parallel using ProcessPoolExecutor, with tqdm to show progress
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        for result in tqdm(executor.map(run_fold, fold_args), total=n_splits, desc="Parallel CV"):
-            cv_results.append(result)
+        results = list(tqdm(executor.map(process_split_wrapper, splits),
+                            total=len(splits),
+                            desc="Processing Yearly Splits"))
     
-    # Plot the results in a grid of subplots.
-    plot_cv_results(cv_results , n_rows, n_cols , n_splits)
-
-    print("fitting final model")
-    best_cv_results = min(cv_results , key = lambda x: x['aic'] )
-    best_p , best_d , best_q = best_cv_results['model_orders']
-
-    final_arima = ARIMA(train, order=(best_p, best_d, best_q) , enforce_stationarity=False, enforce_invertibility=False )
-    final_arima = final_arima.fit()
-
-    plot_test_results(final_arima , train , test , best_p , best_d , best_q)
+    # Create subplots: 3 rows x 2 columns for the CV results
+    fig, axs = plt.subplots(3, 2, figsize=(30, 20))
+    axs = axs.flatten()
     
-
-
-    final_arima.save('../models/arima_model.pkl')
+    # Plot the forecast results for each split
+    for i, res in enumerate(results):
+        train_data = res['train']
+        test_data = res['test']
+        axs[i].plot(train_data.Date, train_data.Price, label='Training Data')
+        axs[i].plot(test_data.Date, test_data.Price, label='True Test Data', color='green')
+        axs[i].plot(test_data.Date, res['forecast_mean'], label='Forecast', color='red')
+        axs[i].fill_between(test_data.Date, 
+                            res['forecast_conf_int'].iloc[:, 0], 
+                            res['forecast_conf_int'].iloc[:, 1],
+                            color='pink', alpha=0.3, label='Confidence Interval')
+        axs[i].set_title(f"Year {res['year']}: Forecast for Next 30 Days MAPE = {res['mape']:.2f}")
+        axs[i].set_xlabel("Date")
+        axs[i].set_ylabel("Price")
+        axs[i].legend()
+    
+    # Turn off any unused subplots if the number of splits is less than 6
+    for j in range(len(results), len(axs)):
+        axs[j].axis('off')
+    
+    fig.savefig("./plots/cv_results_trained_parallel.png", dpi=300)
+    plt.show()
+    
+    # Choose the best model based on minimum AIC across CV splits
+    best_cv_result = min(results, key=lambda x: x['aic'])
+    best_p, best_d, best_q = best_cv_result['model_orders']
+    
+    # Use the last split for final model fitting
+    year, train_data, test_data = splits[-1]
+    final_arima = fit_arima_model(train_data.Price, best_p, best_d, best_q)
+    plot_test_results(final_arima, train_data, test_data, best_p, best_d, best_q)
+    
+    final_arima.save('./models/arima_model_trained_parallel.pkl')
 
 
 
 if __name__ == "__main__":
     main()
+
 
