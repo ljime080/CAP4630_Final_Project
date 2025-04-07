@@ -11,15 +11,13 @@ from tqdm import tqdm
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.stattools import adfuller
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 
 warnings.filterwarnings('ignore')
 
 
 def get_data(ticker):
-    df = yf.download(ticker, period='1y')['Close']
+    df = yf.download(ticker, period='5y')['Close']
     # Adjusting for the yfinance output:
     # In this example, we assume the ticker is TSLA
     df = df['TSLA'].reset_index()
@@ -28,7 +26,7 @@ def get_data(ticker):
     df = df.sort_values(by='Date')
 
     train_size = int(len(df) * 0.8)
-    train, test = df.iloc[:train_size], df.iloc[train_size:]
+    train, test = df.iloc[:train_size], df.iloc[ (df.shape[0] - 30 ) :]
     train = train.sort_values(by='Date')
     test = test.sort_values(by='Date')
     return train, test
@@ -75,7 +73,7 @@ def get_ar_ma_parameters(ts_stationary):
 
 # Step 3: Fit the ARIMA model
 def fit_arima_model(cv_train, p, d, q):
-    model = ARIMA(cv_train, order=(p, d, q))
+    model = ARIMA(cv_train, order=(p, d, q) , enforce_stationarity=False, enforce_invertibility=False)
     model = model.fit()
     return model
 
@@ -111,6 +109,7 @@ def process_fold(start, train, train_size, test_size):
     return {
         'model': cv_model,
         'model_orders': (p, d, q),
+        'aic': cv_model.aic,
         'cv_test': cv_test.Price,
         'cv_forecasts': forecast_cv,
         'mae': mae,
@@ -123,34 +122,8 @@ def run_fold(args):
     return process_fold(*args)
 
 
-def main():
-    train, test = get_data(ticker=['TSLA'])
-    
-    # Fixed window sizes:
-    train_size = 30
-    test_size = 30
-    window_size = train_size + test_size
-    
-    # Calculate number of CV splits
-    n_splits = len(train) - window_size + 1
-    print("Number of rolling CV splits:", n_splits)
-    
-    # Determine grid layout for subplots based on n_splits.
-    n_cols = math.ceil(math.sqrt(n_splits))
-    n_rows = math.ceil(n_splits / n_cols)
-    print(f"Using a grid of {n_rows} rows and {n_cols} columns for the subplots.")
-    
-    # Prepare the list of fold arguments.
-    fold_args = [(start, train, train_size, test_size) for start in range(n_splits)]
-    
-    # Parallel processing of the rolling CV folds.
-    print("Starting parallel rolling cross validation using ProcessPoolExecutor...")
-    cv_results = []
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        for result in tqdm(executor.map(run_fold, fold_args), total=n_splits, desc="Parallel CV"):
-            cv_results.append(result)
-    
-    # Plot the results in a grid of subplots.
+
+def plot_cv_results(cv_results , n_rows, n_cols , n_splits):
     cv_fig, cv_axs = plt.subplots(n_rows, n_cols, figsize=(60, 30))
     # If more than one subplot, flatten the axes array.
     if n_splits > 1:
@@ -175,8 +148,6 @@ def main():
     
                 axes[k].plot(curr_cv_test.index, curr_cv_test, label='CV test data', color='blue')
                 axes[k].plot(curr_forecast_cv.index, curr_forecast_cv, label='CV forecast', color='orange')
-                #axes[k].set_title(plot_title)
-                #axes[k].legend()
                 k += 1
             else:
                 # Turn off any extra subplots.
@@ -184,6 +155,74 @@ def main():
     
     plt.tight_layout()
     plt.show()
+
+
+def plot_test_results(final_model , train, test , p , d , q):
+    test_forecasts = final_model.get_forecast(n = len(test) )
+    test_forecast_mean = test_forecasts.mean
+    test_forecast_confint = test_forecasts.conf_int()
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(train.Date, train.Price, label='Training Data')
+    plt.plot(test.Date, test.Price, label='True Test Data', color='green')
+    plt.plot(test.Date, test_forecast_mean, label='Forecast', color='red')
+    plt.fill_between(test.Date, 
+                     test_forecast_confint.iloc[:, 0], 
+                     test_forecast_confint.iloc[:, 1],
+                     color='pink', alpha=0.3, label='Confidence Interval')
+    plt.title("Test Set Forecast with Confidence Intervals using ARIMA ({p} , {d} , {q})")
+    plt.xlabel("Date")
+    plt.ylabel("Price")
+    plt.legend()
+    plt.show()
+
+
+
+
+
+def main():
+    train, test = get_data(ticker=['TSLA'])
+    
+    # Fixed window sizes:
+    train_size = 365
+    test_size = 30
+    window_size = train_size + test_size
+    
+    # Calculate number of CV splits
+    n_splits = len(train) - window_size + 30
+    print("Number of rolling CV splits:", n_splits)
+    
+    # Determine grid layout for subplots based on n_splits.
+    n_cols = math.ceil(math.sqrt(n_splits))
+    n_rows = math.ceil(n_splits / n_cols)
+    print(f"Using a grid of {n_rows} rows and {n_cols} columns for the subplots.")
+    
+    # Prepare the list of fold arguments.
+    fold_args = [(start, train, train_size, test_size) for start in range(n_splits)]
+    
+    # Parallel processing of the rolling CV folds.
+    print("Starting parallel rolling cross validation using ProcessPoolExecutor...")
+    cv_results = []
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        for result in tqdm(executor.map(run_fold, fold_args), total=n_splits, desc="Parallel CV"):
+            cv_results.append(result)
+    
+    # Plot the results in a grid of subplots.
+    plot_cv_results(cv_results , n_rows, n_cols , n_splits)
+
+    print("fitting final model")
+    best_cv_results = min(cv_results , key = lambda x: x['aic'] )
+    best_p , best_d , best_q = best_cv_results['model_orders']
+
+    final_arima = ARIMA(train, order=(best_p, best_d, best_q) , enforce_stationarity=False, enforce_invertibility=False )
+    final_arima = final_arima.fit()
+
+    plot_test_results(final_arima , train , test , best_p , best_d , best_q)
+    
+
+
+    final_arima.save('../models/arima_model.pkl')
+
 
 
 if __name__ == "__main__":
