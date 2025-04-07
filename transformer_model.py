@@ -109,8 +109,6 @@ def plot_test_results(model, X_test, y_test, scaler, filename="plots/transformer
 # Main Execution
 # -------------------------------
 def main():
-    os.makedirs("plots", exist_ok=True)
-    os.makedirs("models", exist_ok=True)
 
     window_size = 60
     test_size = 30
