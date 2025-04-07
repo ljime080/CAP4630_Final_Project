@@ -143,7 +143,7 @@ def plot_test_results(final_model, train, test, p, d, q):
     plt.ylabel("Price")
     plt.legend()
 
-    plt.savefig("./plots/test_results.png", dpi=300)
+    plt.savefig("./plots/test_results_arima.png", dpi=300)
     plt.show()
 
 
@@ -182,7 +182,7 @@ def main():
 
 
     plt.legend()
-    fig.savefig("./plots/cv_results.png" , dpi = 300)
+    fig.savefig("./plots/cv_results_arima.png" , dpi = 300)
     plt.show()
         # Plot the training data, true test data, forecast, and confidence intervals for this year
     print("fitting final model")
