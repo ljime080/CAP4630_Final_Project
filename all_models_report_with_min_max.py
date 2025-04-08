@@ -20,7 +20,9 @@ from statsmodels.tsa.arima.model import ARIMA
 
 import os
 import random
+import warnings
 
+warnings.filterwarnings('ignore')
 
 os.environ['PYTHONHASHSEED'] = '42'
 os.environ['TF_DETERMINISTIC_OPS'] = '1' 
@@ -208,12 +210,14 @@ def iterative_forecast(model, input_sequence, forecast_horizon):
 
 
 def get_data(ticker="TSLA" , period = '5y'):
-    # 1. Load Tesla stock data for the past 5 years.
-    ticker = "TSLA"
-    data = yf.download(ticker, period="5y")
-    data = data[['Close']].dropna()
-
-    return data
+    df = yf.download(ticker, period=period)['Close']
+    # Adjusting for the yfinance output:
+    # In this example, we assume the ticker is TSLA
+    df = df['TSLA'].reset_index()
+    df.columns = ['Date', 'Price']
+    df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
+    df = df.sort_values(by='Date')
+    return df
 
 
 
@@ -232,17 +236,6 @@ def get_metrics(model_name , y_true , y_pred):
 
     return ret
 
-
-
-def get_data_arima(ticker):
-    df = yf.download(ticker, period='5y')['Close']
-    # Adjusting for the yfinance output:
-    # In this example, we assume the ticker is TSLA
-    df = df['TSLA'].reset_index()
-    df.columns = ['Date', 'Price']
-    df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
-    df = df.sort_values(by='Date')
-    return df
 
 
 def check_stationarity(time_series):
@@ -299,10 +292,10 @@ def get_yearly_splits_arima(df, forecast_horizon=30):
 
 
 def get_metrics_arima(model, test_set):
-    forecasts = model.forecast(steps=len(test_set))
-    mae = mean_absolute_error(test_set, forecasts)
-    mse = mean_squared_error(test_set, forecasts)
-    mape = mean_absolute_percentage_error(test_set, forecasts)
+    forecasts = model.get_forecast(steps=len(test_set))
+    mae = mean_absolute_error(test_set, forecasts.predicted_mean)
+    mse = mean_squared_error(test_set, forecasts.predicted_mean)
+    mape = mean_absolute_percentage_error(test_set, forecasts.predicted_mean)
     return forecasts, mae, mse, mape
 
 
@@ -324,7 +317,7 @@ def process_year_split_arima(train_data, test_data , train_year):
     model_result = fit_arima_model(train_data.Price, p, d, q)
     # Forecast the test period; get_forecast provides confidence intervals
     print("Forecasting next 30 days")
-    forecast_cv, mae, mse, mape = get_metrics(model_result, test_data.Price)
+    forecast_cv, mae, mse, mape = get_metrics_arima(model_result, test_data.Price)
 
     forecast_obj = model_result.get_forecast(steps=len(test_data))
     forecast_mean = forecast_obj.predicted_mean
@@ -346,12 +339,12 @@ def process_year_split_arima(train_data, test_data , train_year):
 
 
 
-def build_arima():
+def build_arima(ticker , period , forecast_horizon = 30):
     # Download 5 years of TSLA data
-    df = get_data_arima(ticker=['TSLA'])
-    
+    df = get_data(ticker=[ticker] , period = period)
+    print(df.columns)
     # Create yearly splits: train on each year, forecast the next 30 days (if available)
-    splits = get_yearly_splits_arima(df, forecast_horizon=30)
+    splits = get_yearly_splits_arima(df, forecast_horizon=forecast_horizon)
     
     results = []
 
@@ -359,17 +352,17 @@ def build_arima():
 
     axs = axs.flatten()
     i = 0
-    for year, train_data, test_data in splits:
+    for year, train_data_arima, test_data_arima in splits:
         print(f"Processing year: {year}")
-        res = process_year_split_arima(train_data, test_data , year)
+        res = process_year_split_arima(train_data_arima, test_data_arima , year)
         res['year'] = year
         results.append(res)
 
 
-        axs[i].plot(train_data.Date, train_data.Price, label='Training Data')
-        axs[i].plot(test_data.Date, test_data.Price, label='True Test Data', color='green')
-        axs[i].plot(test_data.Date, res['forecast_mean'], label='Forecast', color='red')
-        axs[i].fill_between(test_data.Date, 
+        axs[i].plot(train_data_arima.Date, train_data_arima.Price, label='Training Data')
+        axs[i].plot(test_data_arima.Date, test_data_arima.Price, label='True Test Data', color='green')
+        axs[i].plot(test_data_arima.Date, res['forecast_mean'], label='Forecast', color='red')
+        axs[i].fill_between(test_data_arima.Date, 
                          res['forecast_conf_int'].iloc[:, 0], 
                          res['forecast_conf_int'].iloc[:, 1],
                          color='pink', alpha=0.3, label='Confidence Interval')
@@ -382,14 +375,14 @@ def build_arima():
 
     plt.legend()
     fig.savefig("./plots/cv_results_arima.png" , dpi = 300)
-    plt.show()
         # Plot the training data, true test data, forecast, and confidence intervals for this year
     print("fitting final arima model")
     best_cv_results = min(results , key = lambda x: x['aic'] )
     best_p , best_d , best_q = best_cv_results['model_orders']
 
     
-    year , train , test = splits[-1]
+    train = df.iloc[:-forecast_horizon]
+    test = df.iloc[-forecast_horizon:]
     final_arima = fit_arima_model(train.Price , best_p , best_d , best_q) 
 
 
@@ -397,16 +390,43 @@ def build_arima():
 
 
 
+
 ticker="TSLA" 
 period = '5y'
+forecast_horizon = 30     # Last 30 days for testing.
+window_size = 60   
 
-data = get_data(ticker , period)
+
+print("")
+print("Building ARIMA model")
+arima_model, train_arima , test_arima , p, d , q = build_arima(ticker , period , forecast_horizon)
+print(f"ARIMA({p} , {d} , {q}) model fit")
+
+arima_model.save('./models/arima_model.pkl')
+
+
+arima_forecasts, arima_mae, arima_mse, arima_mape = get_metrics_arima(arima_model , test_set= test_arima.Price)
+arima_test_mean_forecast = arima_forecasts.predicted_mean
+arima_test_confint_forecast = arima_forecasts.conf_int()
+
+
+test_results = pd.DataFrame({
+    'model':['ARIMA'],
+    'mse':[arima_mse],
+    'mae':[arima_mae],
+    'mape':[arima_mape]
+})
+
+
+
+
 
 # 2. Define forecasting parameters and split the data.
-forecast_horizon = 30     # Last 30 days for testing.
-window_size = 60          # Use the past 60 days as input.
-train_data = data.iloc[:-forecast_horizon]
-test_data = data.iloc[-forecast_horizon:]
+       # Use the past 60 days as input.
+train_data = train_arima.Price.to_numpy().reshape(-1,1)
+test_data = test_arima.Price.to_numpy().reshape(-1,1)
+
+
 
 # 3. Scale the data.
 print("Scaling data")
@@ -554,29 +574,14 @@ plt.savefig("plots/model_loss_using_min_max.png" , dpi = 300)
 plt.show()
 
 
-print("")
-print("Building ARIMA model")
-arima_model, train_arima , test_arima , p, d , q = build_arima()
-print(f"ARIMA({p} , {d} , {q}) model fit")
 
-
-arima_forecasts, arima_mae, arima_mse, arima_mape = get_metrics_arima(arima_model , test_set= test_arima)
-arima_test_mean_forecast = arima_forecasts.predicted_mean
-arima_test_confint_forecast = arima_forecasts.conf_int()
-
-
-test_results = pd.DataFrame({
-    'model':['ARIMA'],
-    'mse':[arima_mse],
-    'mae':[arima_mae],
-    'mape':[arima_mape]
-})
 
 plt.figure(figsize=(15, 10))
 
 # Plot the actual test data (using a distinct color like black and a thicker line).
-plt.plot(train_arima.Date , train_arima.Price , label = 'Training data' , color = 'blue')
-plt.plot(test_arima.Date , actual_test, label='True testing data', color='red', linewidth=2)
+plt.plot(test_arima.Date , actual_test, label='True testing data', color='blue', linewidth=2)
+plt.plot(test_arima.Date , arima_test_mean_forecast, label='ARIMA predictions', color='orange')
+
 plt.fill_between(test_arima.Date, 
                      arima_test_confint_forecast.iloc[:, 0], 
                      arima_test_confint_forecast.iloc[:, 1],
@@ -592,10 +597,12 @@ for model_name, pred in predictions.items():
 
 plt.xlabel("Date")
 plt.ylabel("Stock Price")
-plt.title("Model Predictions vs Actual")
+plt.title("Model Predictions vs Actual using MinMax scaler")
 plt.legend()
 plt.savefig("plots/model_predictions_using_min_max_including_arima.png" , dpi = 300)
 plt.show()
 
 
 test_results.to_csv("metrics/metrics_results_minmax_including_arima.csv" , index=False)
+
+
