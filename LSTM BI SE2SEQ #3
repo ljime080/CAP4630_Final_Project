@@ -1,0 +1,109 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Dense, Bidirectional
+from tensorflow.keras.optimizers import Adam
+
+# Load Tesla data from Yahoo Finance
+data = yf.download('TSLA', start='2020-01-01', end='2024-12-31')
+data = data[['Close']]
+data = data.dropna()
+
+# Normalize data
+scaler = MinMaxScaler()
+data_scaled = scaler.fit_transform(data)
+
+# Sequence generation (lookback window)
+lookback = 60  # days used for each input sequence
+forecast_horizon = 30
+
+X, y = [], []
+for i in range(lookback, len(data_scaled) - forecast_horizon):
+    X.append(data_scaled[i - lookback:i, 0])
+    y.append(data_scaled[i:i + forecast_horizon, 0])
+
+X, y = np.array(X), np.array(y)
+X = np.reshape(X, (X.shape[0], X.shape[1], 1))  # [samples, timesteps, features]
+
+# Train-test split (last 30 samples for testing)
+split_index = len(X) - 30
+X_train, X_test = X[:split_index], X[split_index:]
+y_train, y_test = y[:split_index], y[split_index:]
+
+# Build Seq2Seq Bidirectional LSTM model
+def build_model(input_shape, output_length):
+    encoder_inputs = Input(shape=input_shape)
+    encoder = Bidirectional(LSTM(128, return_state=True))
+    _, forward_h, forward_c, backward_h, backward_c = encoder(encoder_inputs)
+    state_h = Dense(128, activation='tanh')((forward_h + backward_h) / 2)
+    state_c = Dense(128, activation='tanh')((forward_c + backward_c) / 2)
+
+    decoder_inputs = Input(shape=(output_length, 1))
+    decoder_lstm = LSTM(128, return_sequences=True)
+    decoder_outputs = decoder_lstm(decoder_inputs, initial_state=[state_h, state_c])
+    decoder_dense = Dense(1)
+    outputs = decoder_dense(decoder_outputs)
+
+    model = Model([encoder_inputs, decoder_inputs], outputs)
+    model.compile(optimizer=Adam(learning_rate=0.01), loss='mse')
+    return model
+
+model = build_model((lookback, 1), forecast_horizon)
+
+# Create decoder input: zeros as starting point
+decoder_input_data = np.zeros((X_train.shape[0], forecast_horizon, 1))
+history = model.fit([X_train, decoder_input_data], y_train.reshape(y_train.shape[0], forecast_horizon, 1), 
+                    epochs=10, batch_size=32, verbose=1, validation_split=0.1)
+
+# Evaluate on test data
+decoder_input_test = np.zeros((X_test.shape[0], forecast_horizon, 1))
+predictions = model.predict([X_test, decoder_input_test])
+predictions_rescaled = scaler.inverse_transform(predictions.reshape(-1, 1)).reshape(predictions.shape)
+y_test_rescaled = scaler.inverse_transform(y_test.reshape(-1, 1)).reshape(y_test.shape)
+
+# Plot 1: Training and Validation Loss
+plt.figure(figsize=(8, 4))
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Training vs Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plot 2: Test Predictions vs Actuals over Time
+plt.figure(figsize=(12, 5))
+start_idx = -10  # How many forecast sequences to show
+test_indices = range(len(data) - 30, len(data))
+
+# Plot only the actual test close prices (flat line)
+plt.plot(test_indices, [price for price in y_test_rescaled[-1]], label='Actual Future Prices', color='black')
+
+# Plot predictions
+for i in range(start_idx, 0):
+    plt.plot(test_indices, predictions_rescaled[i], label=f'Forecast {abs(i)}')
+
+plt.title('Predicted vs Actual Stock Prices Over Time')
+plt.xlabel('Days (last 30)')
+plt.ylabel('Close Price')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plot 3: Forecast Overlay (like Seq2Seq comparison)
+plt.figure(figsize=(10, 6))
+plt.plot(range(forecast_horizon), y_test_rescaled[-1], color='black', label='true trend')
+num_forecasts_to_show = 10
+for i in range(-num_forecasts_to_show, 0):
+    plt.plot(range(forecast_horizon), predictions_rescaled[i], label=f'forecast {abs(i)}')
+
+plt.title('LSTM-Bidirectional-Seq2Seq\nAverage Forecast from Last 10 Predictions')
+plt.xlabel('Time (in Days)')
+plt.ylabel('Close Price')
+plt.legend()
+plt.grid(True)
+plt.show()
