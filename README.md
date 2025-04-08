@@ -1,7 +1,7 @@
 # CAP4630_Final_Project
-
+<br>
 Models:
-
+<br>
 Juan: LSTM Seq2Seq
 <br>
 Omar : LSTM Bidirectional Seq2Seq
