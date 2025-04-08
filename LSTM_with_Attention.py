@@ -9,9 +9,7 @@ from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import MinMaxScaler
 import yfinance as yf
 
-# -------------------------------
-# Custom Attention Layer for LSTM Model
-# -------------------------------
+
 class AttentionLayer(Layer):
     def __init__(self, **kwargs):
         super(AttentionLayer, self).__init__(**kwargs)
@@ -116,13 +114,8 @@ def plot_test_results(model, X_test, y_test, scaler, filename="plots/lstm_test_r
     plt.savefig(filename)
     plt.show()
 
-# -------------------------------
-# Main Execution
-# -------------------------------
+
 def main():
-    # Create directories for plots and models
-    os.makedirs("plots", exist_ok=True)
-    os.makedirs("models", exist_ok=True)
 
     window_size = 60
     test_size = 30

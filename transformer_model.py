@@ -8,9 +8,7 @@ from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import MinMaxScaler
 import yfinance as yf
 
-# -------------------------------
-# Helper Functions
-# -------------------------------
+
 def get_data(ticker="TSLA", period="5y"):
     data = yf.download(ticker, period=period)
     close_data = data[['Close']]
@@ -105,12 +103,8 @@ def plot_test_results(model, X_test, y_test, scaler, filename="plots/transformer
     plt.savefig(filename)
     plt.show()
 
-# -------------------------------
-# Main Execution
-# -------------------------------
+
 def main():
-    os.makedirs("plots", exist_ok=True)
-    os.makedirs("models", exist_ok=True)
 
     window_size = 60
     test_size = 30
