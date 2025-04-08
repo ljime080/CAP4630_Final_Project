@@ -385,19 +385,6 @@ plt.tight_layout()
 plt.savefig("plots/model_loss_using_min_max.png" , dpi = 300)
 plt.show()
 
-"""
-plt.figure(figsize=(15, 10))
-for i, model_name in enumerate(predictions.keys(), 1):
-    plt.subplot(3, 2, i)
-    plt.plot(actual_test, label='Actual')
-    plt.plot(predictions[model_name], label='Predicted')
-    plt.title(model_name + " Prediction vs Actual")
-    plt.xlabel("Time Step")
-    plt.ylabel("Stock Price")
-    plt.legend()
-plt.tight_layout()
-plt.show()
-"""
 
 
 test_results = pd.DataFrame()

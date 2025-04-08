@@ -269,7 +269,7 @@ test_scaled = st.t.ppf(test_uniform_clipped, df)
 
 
 
-# ----------------- Data Preparation -----------------
+
 
 print("Creating seq2seq data")
 # 4. Prepare data for sequence-to-sequence models (Group A).
@@ -292,7 +292,7 @@ BATCH_SIZE = 32
 history_dict = {}
 predictions = {}
 
-# ----------------- Model Building, Training and Prediction -----------------
+
 
 # Model 1: LSTM Bidirectional Seq2Seq
 print("Building LSTM Bidirectional Seq2Seq model")
@@ -381,7 +381,7 @@ predictions['Transformer_Regressor'] = inverse_transform_t(pred_transformer.resh
 actual_test = inverse_transform_t(test_scaled.reshape(-1, 1)).flatten()
 
 
-# ----------------- Model Saving -----------------
+
 
 model_lstm_bidir.save("models/model_lstm_bidir_quantile.h5")
 model_lstm_seq2seq.save("models/model_lstm_seq2seq_quantile.h5")
@@ -391,7 +391,6 @@ model_lstm_attention.save("models/model_lstm_attention_regressor_quantile.h5")
 model_transformer.save("models/model_transformer_regressor_quantile.h5")
 
 
-# ----------------- Plotting -----------------
 
 models_list = list(history_dict.keys())
 
