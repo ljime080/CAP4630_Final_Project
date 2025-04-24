@@ -6,7 +6,7 @@ from ensemble_forecasts import AttentionLayer , run_full_forecasting_pipeline, c
 
 
 # --- Page Config ---
-st.set_page_config(page_title="📈 Stock Forecasting Ensemble", layout="centered")
+st.set_page_config(page_title="📈 Stock Forecasting Ensemble", layout="wide")
 st.title("📊 30-Day Stock Price Forecasting")
 
 # --- Initialize session state ---
@@ -52,7 +52,6 @@ if st.session_state.forecast_requested:
         st.session_state.has_models[ticker] = True
 
     st.success(f"✅ Forecast for {ticker} completed!")
-    st.balloons()
 
     # --- Display metrics ---
     st.subheader("📋 Model Metrics")
@@ -68,8 +67,8 @@ if st.session_state.forecast_requested:
         title=f"Next 30-Day Forecast for {ticker}",
         markers=True
     )
-    fig.update_layout(xaxis_title="Date", yaxis_title="Forecasted Price", legend_title="Model" )
-    st.plotly_chart(fig, use_container_width=False)
+    fig.update_layout(xaxis_title="Date", yaxis_title="Forecasted Price", legend_title="Model"  )
+    st.plotly_chart(fig, use_container_width=True)
 
     # --- Download CSV ---
     csv = forecast_df.to_csv(index=False).encode("utf-8")

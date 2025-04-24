@@ -22,6 +22,8 @@ from statsmodels.tsa.arima.model import ARIMA
 import os
 import random
 import warnings
+import streamlit as st
+
 
 warnings.filterwarnings('ignore')
 
@@ -254,6 +256,11 @@ def check_if_ticker_models_exist(ticker):
 
 def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: int = 60, forecast_horizon: int = 30, epochs: int = 50, batch_size: int = 32):
     
+    progress = st.progress(0)
+    status = st.empty()
+
+    status.text("Loading data...")
+    progress.progress(0.1)
     rs = 42
 
     df = get_data(ticker, period)
@@ -282,16 +289,20 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
     predictions = {}
     metrics = []
     models_dir = os.path.join("models", ticker)
+    status.text("Checking if ticker models exist...")
+    progress.progress(0.2)
     model_exists = check_if_ticker_models_exist(ticker)
-
+    
     if model_exists:
-        print("Found models for {ticker}")
+        status.text("Loading pre-trained models...")
+        progress.progress(0.3)
 
         # Load the models from the directory
         model_files = [f for f in os.listdir(models_dir) if f.endswith(".keras")]
-        for model_file in model_files:
-            print(f"Loading model: {model_file}")
+        for model_file in model_files :
+            
             model_name = model_file.split('.')[0]
+            status.text(f"Loading model: {model_name}")
             model_path = os.path.join(models_dir, model_file)
             model = tf.keras.models.load_model(model_path, custom_objects={"AttentionLayer": AttentionLayer})
 
@@ -328,18 +339,21 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
                 y_train_pred = scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten()
                 y_test_true = scaler.inverse_transform(y_reg_test.reshape(-1, 1)).flatten()
                 y_test_pred = scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()
+            status.text(f"Predicting with model: {model_name}")
 
             predictions[model_name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
             metrics.append(get_metrics_split(model_name, y_train_true, y_train_pred, y_test_true, y_test_pred))
-
+        status.text("All models loaded successfully.")
+        progress.progress(0.8)
 
 
     elif not model_exists:
 
-
+        status.text("Training models...")
+        progress.progress(0.4)
         models_dir = "./models" +"/" + ticker
         os.makedirs(models_dir, exist_ok=True)
-
+        
         # --------- Model 1: LSTM Bidirectional Seq2Seq ---------
         model = build_lstm_bidirectional_seq2seq_model(window_size, forecast_horizon)
         model.fit([X_seq_train, np.zeros_like(y_seq_train)], y_seq_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -350,7 +364,8 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_seq_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_seq_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
-        
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.45)
         # --------- Model 2: LSTM Seq2Seq ---------
         model = build_lstm_seq2seq_model(window_size, forecast_horizon)
         model.fit(X_seq_train, y_seq_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -361,6 +376,8 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_seq_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_seq_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.5)
         # --------- Model 3: GRU Seq2Seq ---------
         model = build_gru_seq2seq_model(window_size, forecast_horizon)
         model.fit(X_seq_train, y_seq_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -371,6 +388,8 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_seq_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_seq_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.55)
         # --------- Model 4: BiLSTM Regressor ---------
         model = build_bilstm_regressor(window_size)
         model.fit(X_reg_train, y_reg_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -381,6 +400,8 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_reg_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_reg_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.6)
         # --------- Model 5: LSTM + Attention ---------
         model = build_lstm_attention_regressor(window_size)
         model.fit(X_reg_train, y_reg_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -391,6 +412,8 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_reg_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_reg_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.65)
         # --------- Model 6: Transformer Regressor ---------
         model = build_transformer_regressor(window_size)
         model.fit(X_reg_train, y_reg_train, validation_split=0.2, epochs=epochs, batch_size=batch_size, verbose=0)
@@ -401,8 +424,12 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         predictions[name] = scaler.inverse_transform(future_pred.reshape(-1, 1)).flatten()
         metrics.append(get_metrics_split(name, scaler.inverse_transform(y_reg_train.reshape(-1, 1)).flatten(), scaler.inverse_transform(train_pred.reshape(-1, 1)).flatten(), scaler.inverse_transform(y_reg_test.reshape(-1, 1)).flatten(), scaler.inverse_transform(test_pred.reshape(-1, 1)).flatten()))
         model.save(os.path.join(models_dir, name + ".keras"))
+        status.text(f"Model {name} trained and saved.")
+        progress.progress(0.7)
 
     # Format metrics + predictions
+    status.text("Calculating metrics...")
+    progress.progress(0.9)
     metrics_df = pd.concat(metrics, ignore_index=True)
     last_date = df['Date'].iloc[-1]
     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_horizon)
@@ -412,5 +439,6 @@ def run_full_forecasting_pipeline(ticker: str, period: str = '5y', window_size: 
         for model_name, forecast in predictions.items()
         for date, value in zip(future_dates, forecast)
     ])
+    progress.progress(1.0)
 
     return forecast_df, metrics_df
