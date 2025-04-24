@@ -83,7 +83,7 @@ Then visit [http://localhost:8501](http://localhost:8501) in your browser.
 CAP4630_Final_Project/
 │
 ├── app.py                    # Streamlit UI
-├── ensemble_forecasts.py     # Model training, forecasting, ARIMA, and utilities
+├── ensemble_forecasts.py     # Model training, forecasting, and utilities
 ├── requirements.txt          # Python dependencies
 ├── models/                   # Saved model files organized by ticker
 ├── plots/                    # Saved visualizations (optional)
