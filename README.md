@@ -70,7 +70,7 @@ Then visit [http://localhost:8501](http://localhost:8501) in your browser.
 
 - ✅ Input any stock ticker (e.g. `TSLA`, `AAPL`, `GOOG`)
 - 📊 Train models or load pre-trained ones
-- 🧠 Uses ARIMA, LSTM, GRU, and Transformer architectures
+- 🧠 Uses LSTM, GRU, and Transformer architectures
 - 📈 Visualize forecasts in a multi-line Plotly chart
 - 💾 Download predictions as CSV
 - 🚀 Efficient training with session caching and model persistence
